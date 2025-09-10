@@ -293,40 +293,46 @@ def predict_multiple_and_average(data_file, model_name="NeoQuasar/Kronos-small",
         }
     }
 
-
-def plot_prediction_results(result, save_path="kronos_optimized_prediction.png",
-                            history_display_ratio=0.3, y_axis_expand_ratio=0.1):
-    """
-    绘制预测结果图表 - 仅保留 OHLC 图
-
-    参数说明:
-    result: dict, predict_multiple_and_average 返回的结果
-    save_path: str, 图表保存路径
-    history_display_ratio: float, 历史数据显示比例 (0.0-1.0)
-    y_axis_expand_ratio: float, Y轴扩展比例
-    """
+def get_bar_width_for_frequency(frequency):
+    """根据数据频率获取合适的柱状图宽度"""
+    width_mapping = {
+        'M1': pd.Timedelta(minutes=0.8),
+        'M5': pd.Timedelta(minutes=4),
+        'M15': pd.Timedelta(minutes=12),    # 15分钟图：12分钟宽度
+        'M30': pd.Timedelta(minutes=24),
+        'H1': pd.Timedelta(minutes=48),
+        'H4': pd.Timedelta(hours=3.2),
+        'D1': pd.Timedelta(hours=19.2)
+    }
+    return width_mapping.get(frequency, pd.Timedelta(hours=0.8))
+def plot_prediction_results_adaptive(result, save_path="kronos_adaptive_prediction.png",
+                                     history_display_ratio=0.3, y_axis_expand_ratio=0.1):
+    """自适应绘制预测结果 - 解决15分钟图蜡烛太宽的问题"""
 
     if result is None:
         print("❌ 无预测结果可绘制")
         return
 
-    print("📊 开始生成图表...")
+    print("📊 开始生成自适应图表...")
     plot_start_time = time.time()
 
     pred_df = result['prediction']
     input_df = result['input_data']
     input_timestamps = result['input_timestamps']
     pred_timestamps = result['prediction_timestamps']
+    frequency = result['config']['frequency']
 
-    # 创建图表，使用更大的尺寸以便更好地显示OHLC数据
+    # 获取适合该频率的柱状图宽度
+    bar_width = get_bar_width_for_frequency(frequency)
+
     plt.figure(figsize=(16, 10))
 
-    # 计算要显示的历史数据量（减少历史数据显示比例）
+    # 计算要显示的历史数据量
     history_display_count = max(1, int(len(input_df) * history_display_ratio))
     recent_data = input_df.tail(history_display_count)
     recent_timestamps = input_timestamps.tail(history_display_count)
 
-    # 绘制历史数据的OHLC K线图
+    # 绘制历史数据 - 使用细柱状图替代蜡烛图
     for i in range(len(recent_data)):
         timestamp = recent_timestamps.iloc[i]
         open_price = recent_data['open'].iloc[i]
@@ -334,21 +340,21 @@ def plot_prediction_results(result, save_path="kronos_optimized_prediction.png",
         low_price = recent_data['low'].iloc[i]
         close_price = recent_data['close'].iloc[i]
 
-        # K线颜色：涨为绿色，跌为红色
+        # 颜色设置
         color = 'green' if close_price >= open_price else 'red'
 
-        # 绘制高低价线
+        # 绘制高低价细线
         plt.plot([timestamp, timestamp], [low_price, high_price],
                  color=color, linewidth=1, alpha=0.8)
 
-        # 绘制开盘收盘价矩形
+        # 绘制开盘收盘价细柱（关键改进：使用更细的柱状图）
         body_height = abs(close_price - open_price)
         if body_height > 0:
             bottom = min(open_price, close_price)
             plt.bar(timestamp, body_height, bottom=bottom,
-                    color=color, alpha=0.7, width=pd.Timedelta(hours=0.8))
+                    color=color, alpha=0.7, width=bar_width)  # 使用自适应宽度
 
-    # 绘制预测数据的OHLC K线图（平均值）
+    # 绘制预测数据 - 同样使用细柱状图
     for i in range(len(pred_df)):
         timestamp = pred_timestamps.iloc[i]
         open_price = pred_df['open'].iloc[i]
@@ -356,85 +362,40 @@ def plot_prediction_results(result, save_path="kronos_optimized_prediction.png",
         low_price = pred_df['low'].iloc[i]
         close_price = pred_df['close'].iloc[i]
 
-        # 预测K线使用不同的颜色和透明度
         color = 'lightgreen' if close_price >= open_price else 'lightcoral'
 
         # 绘制高低价线
         plt.plot([timestamp, timestamp], [low_price, high_price],
                  color=color, linewidth=1.5, alpha=0.9)
 
-        # 绘制开盘收盘价矩形
+        # 绘制开盘收盘价细柱（关键改进）
         body_height = abs(close_price - open_price)
         if body_height > 0:
             bottom = min(open_price, close_price)
             plt.bar(timestamp, body_height, bottom=bottom,
-                    color=color, alpha=0.8, width=pd.Timedelta(hours=0.8))
+                    color=color, alpha=0.8, width=bar_width)  # 使用自适应宽度
 
-    # 添加预测起点分界线
+    # 其余绘图代码保持不变...
     plt.axvline(x=input_timestamps.iloc[-1], color='gray',
                 linestyle='--', linewidth=2, alpha=0.7, label='Prediction Start')
 
-    # 计算Y轴范围并增加显示比例
-    all_prices = []
-    all_prices.extend(recent_data['high'].tolist())
-    all_prices.extend(recent_data['low'].tolist())
-    all_prices.extend(pred_df['high'].tolist())
-    all_prices.extend(pred_df['low'].tolist())
-
-    price_min = min(all_prices)
-    price_max = max(all_prices)
-    price_range = price_max - price_min
-
-    # 增加Y轴显示范围
-    y_margin = price_range * y_axis_expand_ratio
-    plt.ylim(price_min - y_margin, price_max + y_margin)
-
-    # 设置标题和标签
+    # 设置标题等...
     avg_change = result['avg_change_ratio']
-    num_used = result['config']['used_predictions']
-    total_predictions = result['config']['num_predictions']
-    temperature = result['config']['temperature']
-    top_p = result['config']['top_p']
-
-    plt.title(f'Kronos Optimized Prediction (T={temperature}, p={top_p}, {num_used} samples) - Change: {avg_change:.2f}%',
+    frequency_display = result['config']['frequency']
+    plt.title(f'Kronos Adaptive Prediction ({frequency_display}) - Change: {avg_change:.2f}%',
               fontsize=16, fontweight='bold', pad=20)
+
     plt.xlabel('Time', fontsize=12)
     plt.ylabel('Price', fontsize=12)
-
-    # 添加图例
-    from matplotlib.patches import Patch
-    legend_elements = [
-        Patch(facecolor='green', alpha=0.7, label='Historical Bullish'),
-        Patch(facecolor='red', alpha=0.7, label='Historical Bearish'),
-        Patch(facecolor='lightgreen', alpha=0.8, label='Predicted Bullish (Avg)'),
-        Patch(facecolor='lightcoral', alpha=0.8, label='Predicted Bearish (Avg)'),
-        plt.Line2D([0], [0], color='gray', linestyle='--', label='Prediction Start')
-    ]
-    plt.legend(handles=legend_elements, loc='upper left')
-
-    # 设置网格
-    plt.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-
-    # 自动格式化x轴日期显示
+    plt.grid(True, alpha=0.3)
     plt.xticks(rotation=45)
-
-    # 调整布局
     plt.tight_layout()
-
-    # 保存图表
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.show()
 
     plot_time = time.time() - plot_start_time
-    print(f"📊 优化OHLC图表已保存至: {save_path} (绘图耗时: {plot_time:.2f}秒)")
-
-    # 输出图表配置信息
-    print(f"📈 图表配置:")
-    print(f"  历史数据显示比例: {history_display_ratio * 100:.1f}%")
-    print(f"  Y轴扩展比例: {y_axis_expand_ratio * 100:.1f}%")
-    print(f"  显示的历史数据点数: {history_display_count}")
-    print(f"  预测数据点数: {len(pred_df)}")
-    print(f"  使用的预测次数: {num_used}/{total_predictions}")
+    print(f"📊 自适应图表已保存: {save_path} (绘图耗时: {plot_time:.2f}秒)")
+    print(f"📈 图表优化: 使用{frequency}频率的自适应柱宽，解决蜡烛过宽问题")
 
 
 def main():
@@ -454,11 +415,11 @@ def main():
 
     # 配置参数（基于论文推荐）
     config = {
-        "data_file": "./data/XAUUSDH1_utf8.csv",  # 您的数据文件路径
+        "data_file": "./data/XAUUSDM15_utf8.csv",  # 您的数据文件路径
         "model_name": "NeoQuasar/Kronos-small",  # 推荐从small开始
         "lookback": 400,  # 历史数据窗口
         "pred_len": 120,  # 预测未来120个周期
-        "frequency": "H1",  # 数据频率，请匹配您的数据
+        "frequency": "M15",  # 数据频率，请匹配您的数据
         "num_predictions": 1,  # 论文推荐：少量高质量预测
         "temperature": 0.6,  # 论文推荐：金融预测用较低温度
         "top_p": 0.7,  # 论文推荐：适中的核采样
@@ -483,10 +444,10 @@ def main():
     if result is not None:
         # 生成优化OHLC图表
         print("\n📊 生成优化OHLC预测图表...")
-        plot_prediction_results(
+        plot_prediction_results_adaptive(
             result,
             save_path="kronos_optimized_ohlc_prediction.png",
-            history_display_ratio=0.25,  # 只显示25%的历史数据
+            history_display_ratio=0.10,  # 只显示部分的历史数据
             y_axis_expand_ratio=0.15  # Y轴扩展15%
         )
 
