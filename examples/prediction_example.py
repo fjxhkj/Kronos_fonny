@@ -43,10 +43,11 @@ tokenizer = KronosTokenizer.from_pretrained("NeoQuasar/Kronos-Tokenizer-base")
 model = Kronos.from_pretrained("NeoQuasar/Kronos-small")
 
 # 2. Instantiate Predictor
-predictor = KronosPredictor(model, tokenizer, device="cuda:0", max_context=512)
+# predictor = KronosPredictor(model, tokenizer, device="cuda:0", max_context=512)
+predictor = KronosPredictor(model, tokenizer, device="cpu", max_context=512)
 
 # 3. Prepare Data
-df = pd.read_csv("./data/XAUUSDM15.csv")
+df = pd.read_csv("./data/XAUUSDH1_utf8.csv")
 df['timestamps'] = pd.to_datetime(df['timestamps'])
 
 # lookback 不可超过 max_context,而 max_context 目前最大仅支持512
