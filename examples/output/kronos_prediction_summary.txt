@@ -1,0 +1,40 @@
+Kronos 预测摘要
+=================
+最后已知价格: 3645.420000
+平均预测最终价格: 3236.159180
+平均预测相对最后已知价格变化: -10.0059% (下跌)
+
+预测期内最高价及时间:
+  最高价: 3644.337158
+  时间: 2025-09-11 01:00:00
+
+预测期内最低价及时间:
+  最低价: 3233.835205
+  时间: 2025-09-14 23:00:00
+
+所有单次预测涨跌幅 (%):
+  第1: -10.5532%
+  第2: -9.0876%
+  第3: -9.5527%
+  第4: -11.2267%
+  第5: -9.6091%
+
+计时信息 (秒):
+  model_load_time: 1.4187
+  predictor_init_time: 0.1225
+  data_load_time: 0.0277
+  data_prep_time: 0.0084
+  total_predictions_time: 13.7766
+  avg_prediction_time: 2.7551
+  analysis_time: 13.7860
+
+配置:
+  model_name: NeoQuasar/Kronos-small
+  lookback: 512
+  pred_len: 100
+  frequency: H1
+  num_predictions: 5
+  used_predictions: 5
+  temperature: 0.8
+  top_p: 0.6
+  sample_count: 3

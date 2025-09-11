@@ -97,28 +97,19 @@ def predict_multiple_and_average(
     temperature=0.6,
     top_p=0.7,
     sample_count=3,
+    compare_target_len=50,
 ):
     """
-    基于论文推荐参数执行多次预测并计算平均值
-
-    参数说明:
-    data_file: str, 历史数据CSV文件路径
-    model_name: str, 使用的Kronos模型
-    lookback: int, 历史数据窗口长度
-    pred_len: int, 预测的未来周期数
-    frequency: str, 数据频率
-    num_predictions: int, 预测次数（推荐3次）
-    temperature: float, 温度参数（论文推荐0.6用于金融预测）
-    top_p: float, 核采样参数（推荐0.7）
-    sample_count: int, 每次预测的采样次数（推荐3）
+    基于论文推荐参数执行多次预测并选择最接近真实走势的预测（若数据包含用于比较的片段）。
+    修改：使用导入数据的最后 50 条记录作为对比片段（若可用），只用预测的前 eval_len 步与该片段比较。
+    若不可用则退回到原行为（使用文件尾作为历史上下文，无比较）。
 
     返回:
-    dict, 包含平均预测结果的字典
+    dict, 包含最终选定的预测（'prediction'），以及所有候选预测、评估信息等
     """
-
     print("🚀 基于Kronos论文优化的预测策略")
     print("=" * 50)
-    print(f"预测次数: {num_predictions} (不去极值，直接平均)")
+    print(f"预测次数: {num_predictions} (不去极值，后续根据可用真实数据选择或平均)")
     print(f"温度参数: {temperature} (论文推荐用于金融预测)")
     print(f"核采样参数: {top_p}")
     print(f"单次采样数: {sample_count}")
@@ -129,16 +120,12 @@ def predict_multiple_and_average(
     model_start_time = time.time()
 
     try:
-        # 优化缓存策略：
-        # 1) 首先检查系统是否存在 Z: 盘（内存盘），若存在且 Z:\model_cache 有内容则直接使用（无需覆盖或复制）
-        # 2) 否则检查项目目录下的持久备份（model_cache_backup），若存在且有内容则直接使用（无需重新下载）
-        # 3) 若两者都不存在，则根据 Z: 是否可用决定下载目标（优先 Z:），下载完成后在项目目录保留备份以防重启丢失
+        # 原有缓存 / 下载逻辑（保持不变）
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         backup_cache = os.path.join(project_root, "model_cache_backup")
         z_root_exists = os.path.exists("Z:\\") and os.path.isdir("Z:\\")
         z_cache = r"Z:\model_cache"
 
-        # 设置 HTTP 代理（如有需要）
         proxy = "http://127.0.0.1:11082"
         os.environ.setdefault("HTTP_PROXY", proxy)
         os.environ.setdefault("HTTPS_PROXY", proxy)
@@ -147,20 +134,16 @@ def predict_multiple_and_average(
 
         cache_dir_to_use = None
 
-        # 优先：如果 Z:\model_cache 存在且非空，直接使用
         if z_root_exists and os.path.exists(z_cache) and len(os.listdir(z_cache)) > 0:
             cache_dir_to_use = z_cache
             print(f"⚡ 使用 Z: 盘缓存 -> {z_cache} (无需覆盖)")
-        # 次选：项目内持久备份存在且非空，使用之
         elif os.path.exists(backup_cache) and len(os.listdir(backup_cache)) > 0:
             cache_dir_to_use = backup_cache
             print(f"📁 使用项目内持久缓存 -> {backup_cache} (无需下载)")
         else:
-            # 需要下载，优先下载到 Z:（如果可用），否则下载到项目备份目录
             download_target = z_cache if z_root_exists else backup_cache
             os.makedirs(download_target, exist_ok=True)
             print(f"📥 开始下载至 -> {download_target} ...")
-            # 下载 tokenizer 与 model 到目标缓存
             local_tokenizer_dir = snapshot_download(
                 repo_id="NeoQuasar/Kronos-Tokenizer-base",
                 cache_dir=download_target,
@@ -169,15 +152,12 @@ def predict_multiple_and_average(
             local_model_dir = snapshot_download(
                 repo_id=model_name, cache_dir=download_target, resume_download=True
             )
-
-            # 若下载到了 Z:，并且项目备份目录不存在或为空，则把下载结果备份回项目目录以持久化
             try:
                 if download_target == z_cache:
                     if (
                         not os.path.exists(backup_cache)
                         or len(os.listdir(backup_cache)) == 0
                     ):
-                        # 先清除原有备份（若存在），再复制
                         if os.path.exists(backup_cache):
                             try:
                                 shutil.rmtree(backup_cache)
@@ -185,13 +165,10 @@ def predict_multiple_and_average(
                                 pass
                         shutil.copytree(z_cache, backup_cache)
                         print(f"💾 已将 Z: 缓存备份到项目目录 -> {backup_cache}")
-                # 指定使用下载目标作为缓存目录
                 cache_dir_to_use = download_target
             except Exception:
-                # 备份失败不阻止继续运行
                 cache_dir_to_use = download_target
 
-        # 使用 snapshot_download 指定 cache_dir（若之前已存在缓存，这里通常很快返回本地路径）
         print(f"📥 确认并定位 tokenizer 与 model（cache_dir={cache_dir_to_use}）...")
         local_tokenizer_dir = snapshot_download(
             repo_id="NeoQuasar/Kronos-Tokenizer-base",
@@ -218,7 +195,6 @@ def predict_multiple_and_average(
     print("🔧 初始化预测器...")
     predictor_start_time = time.time()
 
-    # 自动检测系统是否支持 GPU（优先使用第一个可用 GPU）
     try:
         if _TORCH_AVAILABLE and torch.cuda.is_available():
             device = "cuda:0"
@@ -254,40 +230,67 @@ def predict_multiple_and_average(
         print(f"❌ 数据加载失败: {e}")
         return None
 
-    # 步骤4: 准备输入数据
-    print("🎯 准备预测输入...")
+    # 步骤4: 准备输入数据（使用导入数据最后 50 条作为比较目标）
+    print("🎯 准备预测输入（使用最后50条作为比较目标）...")
     prep_start_time = time.time()
 
     total_length = len(df)
-    start_idx = max(0, total_length - lookback)
-    end_idx = total_length
+    # compare_target_len 由调用方通过 config 提供；确保不超过可用数据
+    compare_target_len = min(compare_target_len, max(0, total_length - 1))
+    # 若无法构造比较目标，则回退到原行为（使用文件末尾作为历史）
+    if compare_target_len > 0 and total_length - compare_target_len - 1 >= 0:
+        # 使用最后 compare_target_len 条作为 ground truth 比较段
+        history_end_idx = total_length - compare_target_len
+        start_idx = max(0, history_end_idx - lookback)
+        end_idx = history_end_idx
+        eval_len = min(compare_target_len, pred_len)
+        print(
+            f"使用最后 {compare_target_len} 条作为比较目标，eval_len={eval_len}, history_end_idx={history_end_idx}"
+        )
+        ground_truth_df = df.iloc[
+            history_end_idx : history_end_idx + compare_target_len
+        ].reset_index(drop=True)
+    else:
+        # 回退：无比较段
+        start_idx = max(0, total_length - lookback)
+        end_idx = total_length
+        history_end_idx = end_idx
+        eval_len = 0
+        ground_truth_df = None
+        print("无法使用最后50条作为比较目标，采用文件末尾作为已知历史（无比较段）")
 
     if "volume" in df.columns and "amount" in df.columns:
         x_df = df.iloc[start_idx:end_idx][
             ["open", "high", "low", "close", "volume", "amount"]
-        ]
+        ].reset_index(drop=True)
         print("✓ 使用完整的OHLCVA数据")
     else:
-        x_df = df.iloc[start_idx:end_idx][["open", "high", "low", "close"]]
+        x_df = df.iloc[start_idx:end_idx][["open", "high", "low", "close"]].reset_index(
+            drop=True
+        )
         print("✓ 使用OHLC基础数据")
 
-    x_timestamp = df.iloc[start_idx:end_idx]["timestamps"]
-    last_known_time = df["timestamps"].iloc[-1]
-    last_known_price = df["close"].iloc[-1]
+    x_timestamp = df.iloc[start_idx:end_idx]["timestamps"].reset_index(drop=True)
+    last_known_time = df["timestamps"].iloc[end_idx - 1]
+    last_known_price = float(df["close"].iloc[end_idx - 1])
+    # 预测时间戳（从 last_known_time 开始）
     y_timestamp = generate_future_timestamps(last_known_time, pred_len, frequency)
 
     prep_time = time.time() - prep_start_time
     print(f"输入数据范围: {x_timestamp.iloc[0]} 到 {x_timestamp.iloc[-1]}")
-    print(f"预测时间范围: {y_timestamp.iloc[0]} 到 {y_timestamp.iloc[-1]}")
+    if ground_truth_df is not None:
+        print(
+            f"用于验证的真实比较段: {ground_truth_df['timestamps'].iloc[0]} 到 {ground_truth_df['timestamps'].iloc[-1]}"
+        )
     print(f"✅ 数据准备完成 (耗时: {prep_time:.2f}秒)")
 
-    # 步骤5: 执行多次预测（使用优化参数）
-    print(f"🔮 开始执行{num_predictions}次预测（使用论文推荐参数）...")
+    # 步骤5: 执行多次预测并保存候选结果
+    print(f"🔮 开始执行{num_predictions}次预测（使用论文推荐参数）...）")
     predictions_start_time = time.time()
 
-    all_predictions = []
-    change_ratios = []
-    prediction_times = []
+    candidate_predictions = []
+    candidate_change_ratios = []
+    candidate_times = []
 
     for i in range(num_predictions):
         single_pred_start = time.time()
@@ -299,19 +302,19 @@ def predict_multiple_and_average(
                 x_timestamp=x_timestamp,
                 y_timestamp=y_timestamp,
                 pred_len=pred_len,
-                T=temperature,  # 论文推荐：较低温度提高确定性
-                top_p=top_p,  # 论文推荐：适中的核采样
-                sample_count=sample_count,  # 论文推荐：多次采样提高稳定性
+                T=temperature,
+                top_p=top_p,
+                sample_count=sample_count,
             )
 
-            # 计算这次预测的涨跌幅度
+            single_pred_time = time.time() - single_pred_start
+            candidate_times.append(single_pred_time)
+
+            # 计算相对于最后已知价格的涨跌幅（针对完整预测）
             change_ratio = calculate_price_change_ratio(pred_df, last_known_price)
 
-            single_pred_time = time.time() - single_pred_start
-            prediction_times.append(single_pred_time)
-
-            all_predictions.append(pred_df.copy())
-            change_ratios.append(change_ratio)
+            candidate_predictions.append(pred_df.copy().reset_index(drop=True))
+            candidate_change_ratios.append(change_ratio)
 
             print(f"完成 (耗时: {single_pred_time:.2f}秒, 涨跌幅: {change_ratio:.2f}%)")
 
@@ -322,74 +325,102 @@ def predict_multiple_and_average(
 
     total_predictions_time = time.time() - predictions_start_time
 
-    if len(all_predictions) < 1:
+    if len(candidate_predictions) < 1:
         print(f"❌ 预测全部失败")
         return None
 
-    print(f"✅ 完成{len(all_predictions)}次有效预测")
-    print(f"📊 预测统计:")
-    print(f"  总预测时间: {total_predictions_time:.2f}秒")
-    print(f"  平均单次预测时间: {np.mean(prediction_times):.2f}秒")
-    if len(prediction_times) > 1:
-        print(f"  最快预测时间: {min(prediction_times):.2f}秒")
-        print(f"  最慢预测时间: {max(prediction_times):.2f}秒")
+    print(f"✅ 完成{len(candidate_predictions)}次有效预测")
+    print(
+        f"📊 预测统计: 总预测时间 {total_predictions_time:.2f}s, 平均单次 {np.mean(candidate_times):.2f}s"
+    )
 
-    # 步骤6: 直接计算平均值（不去极值）
-    print("📊 分析预测结果（不去极值，直接平均）...")
-    analysis_start_time = time.time()
+    # 步骤6: 若存在比较目标（ground_truth_df）则比较并选择最贴近实际走势的预测的前 eval_len 步；否则对候选取平均
+    best_idx = None
+    best_pred_df = None
+    evaluation_metrics = {}
 
-    print("所有预测结果涨跌幅:")
-    for i, ratio in enumerate(change_ratios):
-        print(f"  第{i+1}次: {ratio:.2f}%")
+    if ground_truth_df is not None and eval_len > 0:
+        # 使用均方误差(MSE)在前 eval_len 个 close 上比较
+        gt_close = ground_truth_df["close"].values.astype(float)[:eval_len]
+        errors = []
+        for idx, cand in enumerate(candidate_predictions):
+            pred_close = cand["close"].values.astype(float)[:eval_len]
+            if len(pred_close) < eval_len:
+                pred_close = np.pad(
+                    pred_close, (0, eval_len - len(pred_close)), constant_values=np.nan
+                )
+            mask = ~np.isnan(pred_close)
+            if mask.sum() == 0:
+                mse = float("inf")
+            else:
+                mse = float(np.mean((pred_close[mask] - gt_close[mask]) ** 2))
+            errors.append(mse)
 
-    # 步骤7: 计算平均预测
-    print("🧮 计算平均预测结果...")
+        best_idx = int(np.nanargmin(errors))
+        best_pred_df = candidate_predictions[best_idx]
+        evaluation_metrics["mse_list"] = errors
+        evaluation_metrics["best_idx"] = best_idx
+        evaluation_metrics["best_mse"] = float(errors[best_idx])
+        print(
+            f"🔎 已比较 {len(candidate_predictions)} 个候选（对比前 {eval_len} 步），选择最接近的预测: idx={best_idx}, mse={errors[best_idx]:.6f}"
+        )
 
-    # 初始化平均值DataFrame
-    avg_pred_df = all_predictions[0].copy()
+    else:
+        # 无比较段 -> 对候选预测逐点平均
+        print("ℹ️ 未检测到可比较的真实段，采用候选预测逐点平均作为最终结果")
+        avg_pred_df = candidate_predictions[0].copy()
+        numeric_columns = ["open", "high", "low", "close"]
+        if "volume" in avg_pred_df.columns:
+            numeric_columns.append("volume")
+        if "amount" in avg_pred_df.columns:
+            numeric_columns.append("amount")
+        for col in numeric_columns:
+            avg_pred_df[col] = 0.0
+            for cand in candidate_predictions:
+                avg_pred_df[col] += cand[col].astype(float)
+            avg_pred_df[col] = avg_pred_df[col] / len(candidate_predictions)
+        best_pred_df = avg_pred_df.reset_index(drop=True)
+        best_idx = None
+        evaluation_metrics["mse_list"] = None
+        evaluation_metrics["best_idx"] = None
+        evaluation_metrics["best_mse"] = None
 
-    # 对所有数值列计算平均值
-    numeric_columns = ["open", "high", "low", "close"]
-    if "volume" in avg_pred_df.columns:
-        numeric_columns.append("volume")
-    if "amount" in avg_pred_df.columns:
-        numeric_columns.append("amount")
+    analysis_time = time.time() - prep_start_time
+    print(f"✅ 最终预测选择/合成完成 (耗时: {analysis_time:.2f}s)")
 
-    for col in numeric_columns:
-        avg_pred_df[col] = 0
+    # 计算平均变化率以便上层展示
+    try:
+        avg_change_ratio = (
+            float(np.mean(candidate_change_ratios))
+            if len(candidate_change_ratios) > 0
+            else 0.0
+        )
+    except Exception:
+        avg_change_ratio = 0.0
 
-        # 累加所有预测结果
-        for pred_df in all_predictions:
-            avg_pred_df[col] += pred_df[col]
-
-        # 计算平均值
-        avg_pred_df[col] /= len(all_predictions)
-
-    # 计算平均涨跌幅
-    avg_change_ratio = calculate_price_change_ratio(avg_pred_df, last_known_price)
-
-    analysis_time = time.time() - analysis_start_time
-    print(f"✅ 平均预测计算完成！(耗时: {analysis_time:.2f}秒)")
-    print(f"平均涨跌幅: {avg_change_ratio:.2f}%")
-
+    # 统一返回 key 为 'prediction' 的 DataFrame 以便下游兼容
     return {
-        "prediction": avg_pred_df,
-        "input_data": x_df,
-        "input_timestamps": x_timestamp,
+        "prediction": best_pred_df,
+        "best_index": best_idx,
+        "candidate_predictions": candidate_predictions,
+        "all_predictions": candidate_predictions,  # 兼容旧键名
+        "change_ratios": candidate_change_ratios,
+        "avg_change_ratio": avg_change_ratio,
         "prediction_timestamps": y_timestamp,
         "last_known_price": last_known_price,
-        "all_predictions": all_predictions,
-        "change_ratios": change_ratios,
-        "avg_change_ratio": avg_change_ratio,
+        "ground_truth": ground_truth_df,
+        "evaluation": evaluation_metrics,
         "timing_info": {
             "model_load_time": model_load_time,
             "predictor_init_time": predictor_init_time,
             "data_load_time": data_load_time,
             "data_prep_time": prep_time,
             "total_predictions_time": total_predictions_time,
-            "avg_prediction_time": np.mean(prediction_times),
+            "avg_prediction_time": (
+                np.mean(candidate_times) if len(candidate_times) > 0 else 0.0
+            ),
             "analysis_time": analysis_time,
-            "prediction_times": prediction_times,
+            "prediction_times": candidate_times,
         },
         "config": {
             "model_name": model_name,
@@ -397,11 +428,14 @@ def predict_multiple_and_average(
             "pred_len": pred_len,
             "frequency": frequency,
             "num_predictions": num_predictions,
-            "used_predictions": len(all_predictions),
+            "used_predictions": len(candidate_predictions),
             "temperature": temperature,
             "top_p": top_p,
             "sample_count": sample_count,
         },
+        # 为绘图与外部逻辑提供输入数据与时间戳
+        "input_data": x_df,
+        "input_timestamps": x_timestamp,
     }
 
 
@@ -425,131 +459,171 @@ def plot_prediction_results_adaptive(
     history_display_ratio=0.3,
     y_axis_expand_ratio=0.1,
 ):
-    """自适应绘制预测结果 - 解决15分钟图蜡烛太宽的问题"""
-
+    """自适应绘制预测结果 - 同时展示用于比较的真实未来片段（若有）、候选预测与最终选定预测"""
     if result is None:
         print("❌ 无预测结果可绘制")
         return
 
-    print("📊 开始生成自适应图表...")
+    print("📊 开始生成自适应图表（包含比较段与预测段）...")
     plot_start_time = time.time()
 
     pred_df = result["prediction"]
     input_df = result["input_data"]
-    input_timestamps = result["input_timestamps"]
-    pred_timestamps = result["prediction_timestamps"]
-    frequency = result["config"]["frequency"]
+    input_timestamps = pd.to_datetime(result["input_timestamps"]).reset_index(drop=True)
+    pred_timestamps = pd.to_datetime(result["prediction_timestamps"]).reset_index(
+        drop=True
+    )
+    frequency = result["config"].get("frequency", "H1")
 
-    # 获取适合该频率的柱状图宽度
+    # 可选内容
+    ground_truth = result.get("ground_truth", None)
+    candidate_predictions = result.get("candidate_predictions", [])
+    best_index = result.get("best_index", None)
+
+    # 获取适合该频率的柱状图宽度（若需要OHLC柱）
     bar_width = get_bar_width_for_frequency(frequency)
 
-    plt.figure(figsize=(16, 10))
+    plt.figure(figsize=(16, 9))
 
-    # 计算要显示的历史数据量
+    # 绘制最近历史数据（按比例）
     history_display_count = max(1, int(len(input_df) * history_display_ratio))
-    recent_data = input_df.tail(history_display_count)
-    recent_timestamps = input_timestamps.tail(history_display_count)
+    recent_data = input_df.tail(history_display_count).reset_index(drop=True)
+    recent_timestamps = input_timestamps.tail(history_display_count).reset_index(
+        drop=True
+    )
 
-    # 绘制历史数据 - 使用细柱状图替代蜡烛图
-    for i in range(len(recent_data)):
-        timestamp = recent_timestamps.iloc[i]
-        open_price = recent_data["open"].iloc[i]
-        high_price = recent_data["high"].iloc[i]
-        low_price = recent_data["low"].iloc[i]
-        close_price = recent_data["close"].iloc[i]
+    # 历史：用细线绘制 close，并用细柱表示OHLC（保留原视觉）
+    plt.plot(
+        recent_timestamps,
+        recent_data["close"].values,
+        color="black",
+        linewidth=1.2,
+        label="History (close)",
+    )
 
-        # 颜色设置
-        color = "green" if close_price >= open_price else "red"
-
-        # 绘制高低价细线
+    # 如果存在真实未来片段，绘制在历史之后的比较段（实线）
+    if ground_truth is not None and len(ground_truth) > 0:
+        gt_ts = pd.to_datetime(ground_truth["timestamps"]).reset_index(drop=True)
+        gt_close = ground_truth["close"].astype(float).values
         plt.plot(
-            [timestamp, timestamp],
-            [low_price, high_price],
-            color=color,
-            linewidth=1,
-            alpha=0.8,
+            gt_ts, gt_close, color="k", linewidth=2.0, label="Ground Truth (close)"
         )
+    else:
+        gt_ts = None
 
-        # 绘制开盘收盘价细柱（关键改进：使用更细的柱状图）
-        body_height = abs(close_price - open_price)
-        if body_height > 0:
-            bottom = min(open_price, close_price)
-            plt.bar(
-                timestamp,
-                body_height,
-                bottom=bottom,
-                color=color,
-                alpha=0.7,
-                width=bar_width,
-            )  # 使用自适应宽度
+    # 绘制所有候选预测（半透明虚线），用于显示不确定性
+    for idx, cand in enumerate(candidate_predictions):
+        try:
+            cand_ts = pred_timestamps.iloc[: len(cand)]
+            plt.plot(
+                cand_ts,
+                cand["close"].astype(float).values,
+                color="gray",
+                linestyle="--",
+                alpha=0.25,
+                linewidth=1,
+                label="Candidate Predictions" if idx == 0 else None,
+            )
+        except Exception:
+            continue
 
-    # 绘制预测数据 - 同样使用细柱状图
-    for i in range(len(pred_df)):
-        timestamp = pred_timestamps.iloc[i]
-        open_price = pred_df["open"].iloc[i]
-        high_price = pred_df["high"].iloc[i]
-        low_price = pred_df["low"].iloc[i]
-        close_price = pred_df["close"].iloc[i]
-
-        color = "lightgreen" if close_price >= open_price else "lightcoral"
-
-        # 绘制高低价线
+    # 绘制最终选定的预测（或平均预测），用醒目颜色
+    try:
+        final_ts = pred_timestamps.iloc[: len(pred_df)]
         plt.plot(
-            [timestamp, timestamp],
-            [low_price, high_price],
-            color=color,
-            linewidth=1.5,
-            alpha=0.9,
+            final_ts,
+            pred_df["close"].astype(float).values,
+            color="tab:blue",
+            linewidth=2.2,
+            label="Selected Prediction",
         )
+        # 标注最终预测的最高与最低点
+        max_pos = int(np.argmax(pred_df["high"].values))
+        min_pos = int(np.argmin(pred_df["low"].values))
+        plt.scatter(
+            [final_ts.iloc[max_pos]],
+            [pred_df["high"].iloc[max_pos]],
+            color="tab:green",
+            s=50,
+            zorder=5,
+            label=(
+                "Predicted High"
+                if "Predicted High" not in plt.gca().get_legend_handles_labels()[1]
+                else None
+            ),
+        )
+        plt.scatter(
+            [final_ts.iloc[min_pos]],
+            [pred_df["low"].iloc[min_pos]],
+            color="tab:red",
+            s=50,
+            zorder=5,
+            label=(
+                "Predicted Low"
+                if "Predicted Low" not in plt.gca().get_legend_handles_labels()[1]
+                else None
+            ),
+        )
+    except Exception:
+        pass
 
-        # 绘制开盘收盘价细柱（关键改进）
-        body_height = abs(close_price - open_price)
-        if body_height > 0:
-            bottom = min(open_price, close_price)
-            plt.bar(
-                timestamp,
-                body_height,
-                bottom=bottom,
-                color=color,
-                alpha=0.8,
-                width=bar_width,
-            )  # 使用自适应宽度
+    # 若存在 ground truth 并且其区间与预测时间有重叠，绘制残差（可选，绘在右侧小窗或作为点）
+    if ground_truth is not None and len(ground_truth) > 0:
+        # 对比段：若长度一致，则绘制误差线（灰色细棒）
+        try:
+            compare_len = min(len(ground_truth), len(pred_df))
+            comp_ts = pd.to_datetime(ground_truth["timestamps"]).reset_index(drop=True)[
+                :compare_len
+            ]
+            error = (
+                pred_df["close"].astype(float).values[:compare_len]
+                - ground_truth["close"].astype(float).values[:compare_len]
+            )
+            # 在主图上绘制误差的散点（以辅助视觉显示误差方向）
+            err_colors = ["tab:green" if v >= 0 else "tab:red" for v in error]
+            plt.scatter(
+                comp_ts,
+                ground_truth["close"].astype(float).values[:compare_len],
+                c=err_colors,
+                s=20,
+                alpha=0.9,
+                marker="x",
+                label="GT (+) / (-) err" if True else None,
+            )
+        except Exception:
+            pass
 
-    # 其余绘图代码保持不变...
+    # 视觉与格式化
     plt.axvline(
         x=input_timestamps.iloc[-1],
         color="gray",
         linestyle="--",
-        linewidth=2,
+        linewidth=1.5,
         alpha=0.7,
         label="Prediction Start",
     )
-
-    # 设置标题等...
-    avg_change = result["avg_change_ratio"]
-    frequency_display = result["config"]["frequency"]
+    avg_change = result.get("avg_change_ratio", 0.0)
+    freq_display = frequency
     plt.title(
-        f"Kronos Adaptive Prediction ({frequency_display}) - Change: {avg_change:.2f}%",
-        fontsize=16,
-        fontweight="bold",
-        pad=20,
+        f"Kronos Prediction Comparison ({freq_display}) - Change: {avg_change:.2f}%",
+        fontsize=14,
     )
-
-    plt.xlabel("Time", fontsize=12)
-    plt.ylabel("Price", fontsize=12)
+    plt.xlabel("Time")
+    plt.ylabel("Price")
     plt.grid(True, alpha=0.3)
-    plt.xticks(rotation=45)
+    plt.xticks(rotation=30)
+    plt.legend(fontsize=10, loc="best")
+
     plt.tight_layout()
-    # 确保目标保存目录存在
+
+    # 保存
     save_dir = os.path.dirname(save_path) or "."
     os.makedirs(save_dir, exist_ok=True)
-
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.show()
 
     plot_time = time.time() - plot_start_time
-    print(f"📊 自适应图表已保存: {save_path} (绘图耗时: {plot_time:.2f}秒)")
-    print(f"📈 图表优化: 使用{frequency}频率的自适应柱宽，解决蜡烛过宽问题")
+    print(f"📊 自适应对比图已保存: {save_path} (耗时: {plot_time:.2f}s)")
 
 
 def main():
@@ -572,12 +646,14 @@ def main():
         "data_file": "./data/XAUUSDH1_utf8.csv",  # 您的数据文件路径
         "model_name": "NeoQuasar/Kronos-small",  # 推荐从small开始
         "lookback": 512,  # 历史数据窗口
-        "pred_len": 100,  # 预测未来120个周期
         "frequency": "H1",  # 数据频率，请匹配您的数据
-        "num_predictions": 5,  # 论文推荐：少量高质量预测
-        "temperature": 0.8,  # 论文推荐：金融预测用较低温度
-        "top_p": 0.6,  # 论文推荐：适中的核采样
-        "sample_count": 3,  # 论文推荐：每次多采样提高稳定性
+        # 调整以提高选出最贴近实际走势的概率：
+        "num_predictions": 5,  # 增加候选次数（建议 5-10）
+        "temperature": 0.8,  # 降低温度提高确定性
+        "top_p": 0.6,  # 略收紧核采样
+        "sample_count": 3,  # 每次内部采样增大以提升单次质量
+        "compare_target_len": 20,  # 用于比较的真实数据条数（可调，建议 20-100）
+        "pred_len": 100,  # 预测未来的周期个数
     }
 
     print("📋 优化预测配置（基于论文推荐）:")
@@ -612,6 +688,8 @@ def main():
 
         # 保存文件（全部写入 output 目录）
         print("\n💾 保存结果文件...")
+        save_start_time = time.time()
+
         # 不导出 CSV，仅保留文本描述摘要保存逻辑
         save_start_time = time.time()
         print("💾 不导出 CSV，保留文本摘要保存逻辑...")
@@ -688,9 +766,7 @@ def main():
                     f.write(f"  {k}: {v}\n")
 
             save_time = time.time() - save_start_time
-            print(
-                f"💾 文本预测摘要已保存: {text_summary_path} (保存耗时: {save_time:.2f}秒)"
-            )
+            print(f"💾 文本预测摘要已保存: {text_summary_path} (保存耗时: {save_time:.2f}秒)")
         except Exception as e:
             save_time = time.time() - save_start_time
             print(f"⚠️ 无法保存文本摘要: {e} (耗时: {save_time:.2f}秒)")

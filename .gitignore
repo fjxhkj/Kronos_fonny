@@ -76,3 +76,4 @@ temp/
 tmp/
 /examples/*.png
 /webui/prediction_results/*.json
+model_cache_backup
