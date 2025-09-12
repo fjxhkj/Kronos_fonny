@@ -28,7 +28,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(script_dir, ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
-    
+
 from model import Kronos, KronosTokenizer, KronosPredictor
 
 
@@ -89,15 +89,15 @@ def calculate_price_change_ratio(pred_df, last_known_price):
 
 def predict_multiple_and_average(
     data_file,
-    model_name="NeoQuasar/Kronos-small",
-    lookback=400,
-    pred_len=120,
-    frequency="H1",
-    num_predictions=3,
-    temperature=0.6,
-    top_p=0.7,
-    sample_count=3,
-    compare_target_len=50,
+    model_name,
+    lookback,
+    pred_len,
+    frequency,
+    num_predictions,
+    temperature,
+    top_p,
+    sample_count,
+    compare_target_len,
 ):
     """
     基于推荐参数执行多次预测并选择最接近真实走势的预测（若数据包含用于比较的片段）。
@@ -455,9 +455,9 @@ def get_bar_width_for_frequency(frequency):
 
 def plot_prediction_results_adaptive(
     result,
-    save_path="kronos_adaptive_prediction.png",
-    history_display_ratio=0.3,
-    y_axis_expand_ratio=0.1,
+    save_path,
+    history_display_ratio,
+    y_axis_expand_ratio,
 ):
     """自适应绘制预测结果 - 同时展示用于比较的真实未来片段（若有）、候选预测与最终选定预测"""
     if result is None:
@@ -602,15 +602,22 @@ def plot_prediction_results_adaptive(
         alpha=0.7,
         label="Prediction Start",
     )
+
     avg_change = result.get("avg_change_ratio", 0.0)
     freq_display = frequency
+    num_predictions = result["config"]["num_predictions"]
+    temperature = result["config"]["temperature"]
+    top_p = result["config"]["top_p"]
+    sample_count = result["config"]["sample_count"]
     plt.title(
-        f"Kronos Prediction Comparison ({freq_display}) - Change: {avg_change:.2f}%",
-        fontsize=14,
+        f"Kronos Prediction Comparison ({freq_display},t:{temperature},p:{top_p},{sample_count}x{num_predictions}) - Change: {avg_change:.2f}%",
+        fontsize=12,
+        fontweight="bold",
+        pad=20,
     )
-    plt.xlabel("Time")
-    plt.ylabel("Price")
-    plt.grid(True, alpha=0.3)
+    plt.xlabel("Time", fontsize=10)
+    plt.ylabel("Price", fontsize=10)
+    plt.grid(True, alpha=0.2)
     plt.xticks(rotation=30)
     plt.legend(fontsize=10, loc="best")
 
@@ -643,13 +650,12 @@ def main():
 
     # 配置参数（基于推荐）
     config = {
-        "data_file": "./data/XAUUSDM5_utf8.csv",  # 您的数据文件路径
+        "data_file": "./data/XAUUSDM15_utf8.csv",  # 您的数据文件路径
         "model_name": "NeoQuasar/Kronos-small",  # 推荐从small开始
         "lookback": 512,  # 历史数据窗口
-        "frequency": "M5",  # 数据频率，请匹配您的数据
-        # 调整以提高选出最贴近实际走势的概率：
-        "num_predictions": 2,  # 增加候选次数（建议 5-10）
-        "temperature": 0.6,  # 降低温度提高确定性
+        "frequency": "M15",  # 数据频率，请匹配您的数据
+        "num_predictions": 3,  # 增加候选次数（建议 5-10）
+        "temperature": 0.9,  # 降低温度提高确定性
         "top_p": 0.7,  # 略收紧核采样
         "sample_count": 3,  # 每次内部采样增大以提升单次质量
         "compare_target_len": 20,  # 用于比较的真实数据条数（可调，建议 20-100）
@@ -660,10 +666,12 @@ def main():
     for key, value in config.items():
         print(f"  {key}: {value}")
     print("\n🧠 参数优化原理:")
-    print("  • 低温度(0.6): 提高预测确定性，减少随机性")
-    print("  • 适中top_p(0.7): 平衡多样性与准确性")
-    print("  • 3次采样: 足够评估不确定性，避免过度计算")
-    print("  • 直接平均: 避免损失有用信息，保持预测连续性")
+    print(f"  • 温度({config['temperature']}): 提高预测确定性，减少随机性")
+    print(f"  • top_p({config['top_p']}): 平衡多样性与准确性")
+    print(f"  • {config['sample_count']}次采样: 足够评估不确定性，避免过度计算")
+    print(
+        f"  • 预测{config['num_predictions']}次后平均: 避免损失有用信息，保持预测连续性"
+    )
     print()
 
     # Ensure output directory relative to this script (examples/) instead of project root
@@ -681,7 +689,9 @@ def main():
         print("\n📊 生成优化OHLC预测图表...")
         plot_prediction_results_adaptive(
             result,
-            save_path=os.path.join(output_dir, "kronos_optimized_ohlc_prediction.png"),
+            save_path=os.path.join(
+                output_dir, f"prediction_future_compare_{config['frequency']}.png"
+            ),
             history_display_ratio=0.10,  # 只显示部分的历史数据
             y_axis_expand_ratio=0.15,  # Y轴扩展15%
         )
@@ -722,7 +732,7 @@ def main():
             )
 
             text_summary_path = os.path.join(
-                output_dir, "kronos_prediction_summary.txt"
+                output_dir, f"prediction_future_compare_{config['frequency']}.txt"
             )
             with open(text_summary_path, "w", encoding="utf-8") as f:
                 f.write("Kronos 预测摘要\n")
@@ -766,7 +776,9 @@ def main():
                     f.write(f"  {k}: {v}\n")
 
             save_time = time.time() - save_start_time
-            print(f"💾 文本预测摘要已保存: {text_summary_path} (保存耗时: {save_time:.2f}秒)")
+            print(
+                f"💾 文本预测摘要已保存: {text_summary_path} (保存耗时: {save_time:.2f}秒)"
+            )
         except Exception as e:
             save_time = time.time() - save_start_time
             print(f"⚠️ 无法保存文本摘要: {e} (耗时: {save_time:.2f}秒)")

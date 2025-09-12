@@ -89,14 +89,14 @@ def calculate_price_change_ratio(pred_df, last_known_price):
 
 def predict_multiple_and_average(
     data_file,
-    model_name="NeoQuasar/Kronos-small",
-    lookback=400,
-    pred_len=120,
-    frequency="H1",
-    num_predictions=3,
-    temperature=0.6,
-    top_p=0.7,
-    sample_count=3,
+    model_name,
+    lookback,
+    pred_len,
+    frequency,
+    num_predictions,
+    temperature,
+    top_p,
+    sample_count,
 ):
     """
     基于推荐参数执行多次预测并计算平均值
@@ -421,9 +421,9 @@ def get_bar_width_for_frequency(frequency):
 
 def plot_prediction_results_adaptive(
     result,
-    save_path="kronos_adaptive_prediction.png",
-    history_display_ratio=0.3,
-    y_axis_expand_ratio=0.1,
+    save_path,
+    history_display_ratio,
+    y_axis_expand_ratio,
 ):
     """自适应绘制预测结果 - 解决15分钟图蜡烛太宽的问题"""
 
@@ -528,17 +528,21 @@ def plot_prediction_results_adaptive(
     # 设置标题等...
     avg_change = result["avg_change_ratio"]
     frequency_display = result["config"]["frequency"]
+    num_predictions = result["config"]["num_predictions"]
+    temperature = result["config"]["temperature"]
+    top_p = result["config"]["top_p"]
+    sample_count = result["config"]["sample_count"]
     plt.title(
-        f"Kronos Adaptive Prediction ({frequency_display}) - Change: {avg_change:.2f}%",
-        fontsize=16,
+        f"Kronos Adaptive Prediction ({frequency_display},t:{temperature},p:{top_p},{sample_count}x{num_predictions}) - Change: {avg_change:.2f}%",
+        fontsize=12,
         fontweight="bold",
         pad=20,
     )
 
-    plt.xlabel("Time", fontsize=12)
-    plt.ylabel("Price", fontsize=12)
-    plt.grid(True, alpha=0.3)
-    plt.xticks(rotation=45)
+    plt.xlabel("Time", fontsize=10)
+    plt.ylabel("Price", fontsize=10)
+    plt.grid(True, alpha=0.2)
+    plt.xticks(rotation=30)
     plt.tight_layout()
     # 确保目标保存目录存在
     save_dir = os.path.dirname(save_path) or "."
@@ -569,13 +573,13 @@ def main():
 
     # 配置参数
     config = {
-        "data_file": "./data/XAUUSDM5_utf8.csv",  # 您的数据文件路径
+        "data_file": "./data/XAUUSDM15_utf8.csv",  # 您的数据文件路径
         "model_name": "NeoQuasar/Kronos-small",  # 推荐从small开始
         "lookback": 512,  # 历史数据窗口
         "pred_len": 100,  # 预测未来120个周期
-        "frequency": "M5",  # 数据频率，请匹配您的数据
-        "num_predictions": 2,  # 预测次数（推荐2次以上）
-        "temperature": 0.6,  # 金融预测用较低温度
+        "frequency": "M15",  # 数据频率，请匹配您的数据
+        "num_predictions": 3,  # 预测次数（推荐2次以上）
+        "temperature": 0.9,  # 金融预测用较低温度
         "top_p": 0.7,  # 适中的核采样
         "sample_count": 3,  # 每次多采样提高稳定性
     }
@@ -584,10 +588,12 @@ def main():
     for key, value in config.items():
         print(f"  {key}: {value}")
     print("\n🧠 参数优化原理:")
-    print("  • 低温度(0.6): 提高预测确定性，减少随机性")
-    print("  • 适中top_p(0.7): 平衡多样性与准确性")
-    print("  • 3次采样: 足够评估不确定性，避免过度计算")
-    print("  • 直接平均: 避免损失有用信息，保持预测连续性")
+    print(f"  • 温度({config['temperature']}): 提高预测确定性，减少随机性")
+    print(f"  • top_p({config['top_p']}): 平衡多样性与准确性")
+    print(f"  • {config['sample_count']}次采样: 足够评估不确定性，避免过度计算")
+    print(
+        f"  • 预测{config['num_predictions']}次后平均: 避免损失有用信息，保持预测连续性"
+    )
     print()
 
     # Ensure output directory relative to this script (examples/) instead of project root
@@ -605,7 +611,9 @@ def main():
         print("\n📊 生成优化OHLC预测图表...")
         plot_prediction_results_adaptive(
             result,
-            save_path=os.path.join(output_dir, "kronos_optimized_ohlc_prediction.png"),
+            save_path=os.path.join(
+                output_dir, f"prediction_future_only_{config['frequency']}.png"
+            ),
             history_display_ratio=0.10,  # 只显示部分的历史数据
             y_axis_expand_ratio=0.15,  # Y轴扩展15%
         )
@@ -644,7 +652,7 @@ def main():
             )
 
             text_summary_path = os.path.join(
-                output_dir, "kronos_prediction_summary.txt"
+                output_dir, f"prediction_future_only_{config['frequency']}.txt"
             )
             with open(text_summary_path, "w", encoding="utf-8") as f:
                 f.write("Kronos 预测摘要\n")
