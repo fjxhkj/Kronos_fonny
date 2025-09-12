@@ -1,6 +1,6 @@
 # =======================
 # 文件名: future_prediction_optimized.py
-# 基于Kronos论文推荐的采样参数优化版本
+# 基于推荐的采样参数优化版本
 # =======================
 
 import pandas as pd
@@ -28,7 +28,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(script_dir, ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
-    
+
 from model import Kronos, KronosTokenizer, KronosPredictor
 
 
@@ -99,7 +99,7 @@ def predict_multiple_and_average(
     sample_count=3,
 ):
     """
-    基于论文推荐参数执行多次预测并计算平均值
+    基于推荐参数执行多次预测并计算平均值
 
     参数说明:
     data_file: str, 历史数据CSV文件路径
@@ -108,7 +108,7 @@ def predict_multiple_and_average(
     pred_len: int, 预测的未来周期数
     frequency: str, 数据频率
     num_predictions: int, 预测次数（推荐3次）
-    temperature: float, 温度参数（论文推荐0.6用于金融预测）
+    temperature: float, 温度参数（推荐0.6用于金融预测）
     top_p: float, 核采样参数（推荐0.7）
     sample_count: int, 每次预测的采样次数（推荐3）
 
@@ -116,10 +116,10 @@ def predict_multiple_and_average(
     dict, 包含平均预测结果的字典
     """
 
-    print("🚀 基于Kronos论文优化的预测策略")
+    print("🚀 优化的预测策略")
     print("=" * 50)
     print(f"预测次数: {num_predictions} (不去极值，直接平均)")
-    print(f"温度参数: {temperature} (论文推荐用于金融预测)")
+    print(f"温度参数: {temperature} (推荐用于金融预测)")
     print(f"核采样参数: {top_p}")
     print(f"单次采样数: {sample_count}")
     print()
@@ -282,7 +282,7 @@ def predict_multiple_and_average(
     print(f"✅ 数据准备完成 (耗时: {prep_time:.2f}秒)")
 
     # 步骤5: 执行多次预测（使用优化参数）
-    print(f"🔮 开始执行{num_predictions}次预测（使用论文推荐参数）...")
+    print(f"🔮 开始执行{num_predictions}次预测 ...")
     predictions_start_time = time.time()
 
     all_predictions = []
@@ -299,9 +299,9 @@ def predict_multiple_and_average(
                 x_timestamp=x_timestamp,
                 y_timestamp=y_timestamp,
                 pred_len=pred_len,
-                T=temperature,  # 论文推荐：较低温度提高确定性
-                top_p=top_p,  # 论文推荐：适中的核采样
-                sample_count=sample_count,  # 论文推荐：多次采样提高稳定性
+                T=temperature,
+                top_p=top_p,
+                sample_count=sample_count,
             )
 
             # 计算这次预测的涨跌幅度
@@ -554,33 +554,33 @@ def plot_prediction_results_adaptive(
 
 def main():
     """
-    主函数：执行基于论文推荐的优化预测流程
+    主函数：执行预测流程
     """
 
     # 脚本开始时间
     script_start_time = time.time()
     start_datetime = datetime.now()
 
-    print("🎯 Kronos论文优化预测策略")
-    print("基于论文推荐采样参数 - 3次直接平均（不去极值）")
+    print("🎯 优化预测策略")
+    print("采样参数 - 3次直接平均（不去极值）")
     print("=" * 50)
     print(f"⏰ 脚本开始时间: {start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 50)
 
-    # 配置参数（基于论文推荐）
+    # 配置参数
     config = {
-        "data_file": "./data/XAUUSDH1_utf8.csv",  # 您的数据文件路径
+        "data_file": "./data/XAUUSDM5_utf8.csv",  # 您的数据文件路径
         "model_name": "NeoQuasar/Kronos-small",  # 推荐从small开始
         "lookback": 512,  # 历史数据窗口
         "pred_len": 100,  # 预测未来120个周期
-        "frequency": "H1",  # 数据频率，请匹配您的数据
-        "num_predictions": 5,  # 论文推荐：少量高质量预测
-        "temperature": 0.8,  # 论文推荐：金融预测用较低温度
-        "top_p": 0.6,  # 论文推荐：适中的核采样
-        "sample_count": 3,  # 论文推荐：每次多采样提高稳定性
+        "frequency": "M5",  # 数据频率，请匹配您的数据
+        "num_predictions": 2,  # 预测次数（推荐2次以上）
+        "temperature": 0.6,  # 金融预测用较低温度
+        "top_p": 0.7,  # 适中的核采样
+        "sample_count": 3,  # 每次多采样提高稳定性
     }
 
-    print("📋 优化预测配置（基于论文推荐）:")
+    print("📋 优化预测配置:")
     for key, value in config.items():
         print(f"  {key}: {value}")
     print("\n🧠 参数优化原理:")
@@ -703,7 +703,7 @@ def main():
         timing_info = result["timing_info"]
 
         print("\n📈 优化预测摘要:")
-        print(f"预测策略: 论文推荐参数 + 直接平均")
+        print(f"预测策略: 直接平均")
         print(f"预测次数: {config_info['num_predictions']} (全部使用)")
         print(f"有效预测: {len(result['all_predictions'])}")
         print(f"最后已知价格: {last_price:.4f}")
@@ -741,7 +741,7 @@ def main():
 
         # 优化效果分析
         print(f"\n🚀 优化效果分析:")
-        print(f"  • 采用论文推荐的低温度参数，提高预测确定性")
+        print(f"  • 低温度参数，提高预测确定性")
         print(f"  • 使用适中的核采样参数，平衡准确性与多样性")
         print(f"  • 3次直接平均，避免损失边缘信息")
         print(f"  • 每次预测内部多采样，提高单次预测质量")
@@ -759,7 +759,7 @@ def main():
     print(f"开始时间: {start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"结束时间: {end_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"总执行时间: {total_script_time:.2f}秒 ({total_script_time/60:.2f}分钟)")
-    print("🎯 基于Kronos论文的优化策略执行完毕！")
+    print("🎯 执行完毕！")
     print("=" * 50)
 
 

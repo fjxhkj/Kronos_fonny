@@ -1,6 +1,6 @@
 # =======================
 # 文件名: future_prediction_optimized.py
-# 基于Kronos论文推荐的采样参数优化版本
+# 基于Kronos推荐的采样参数优化版本
 # =======================
 
 import pandas as pd
@@ -100,17 +100,17 @@ def predict_multiple_and_average(
     compare_target_len=50,
 ):
     """
-    基于论文推荐参数执行多次预测并选择最接近真实走势的预测（若数据包含用于比较的片段）。
+    基于推荐参数执行多次预测并选择最接近真实走势的预测（若数据包含用于比较的片段）。
     修改：使用导入数据的最后 50 条记录作为对比片段（若可用），只用预测的前 eval_len 步与该片段比较。
     若不可用则退回到原行为（使用文件尾作为历史上下文，无比较）。
 
     返回:
     dict, 包含最终选定的预测（'prediction'），以及所有候选预测、评估信息等
     """
-    print("🚀 基于Kronos论文优化的预测策略")
+    print("🚀 基于Kronos优化的预测策略")
     print("=" * 50)
     print(f"预测次数: {num_predictions} (不去极值，后续根据可用真实数据选择或平均)")
-    print(f"温度参数: {temperature} (论文推荐用于金融预测)")
+    print(f"温度参数: {temperature} (推荐用于金融预测)")
     print(f"核采样参数: {top_p}")
     print(f"单次采样数: {sample_count}")
     print()
@@ -231,7 +231,7 @@ def predict_multiple_and_average(
         return None
 
     # 步骤4: 准备输入数据（使用导入数据最后 50 条作为比较目标）
-    print("🎯 准备预测输入（使用最后50条作为比较目标）...")
+    print("🎯 准备预测输入...")
     prep_start_time = time.time()
 
     total_length = len(df)
@@ -285,7 +285,7 @@ def predict_multiple_and_average(
     print(f"✅ 数据准备完成 (耗时: {prep_time:.2f}秒)")
 
     # 步骤5: 执行多次预测并保存候选结果
-    print(f"🔮 开始执行{num_predictions}次预测（使用论文推荐参数）...）")
+    print(f"🔮 开始执行{num_predictions}次预测（使用推荐参数）...）")
     predictions_start_time = time.time()
 
     candidate_predictions = []
@@ -628,35 +628,35 @@ def plot_prediction_results_adaptive(
 
 def main():
     """
-    主函数：执行基于论文推荐的优化预测流程
+    主函数：执行基于推荐的优化预测流程
     """
 
     # 脚本开始时间
     script_start_time = time.time()
     start_datetime = datetime.now()
 
-    print("🎯 Kronos论文优化预测策略")
-    print("基于论文推荐采样参数 - 3次直接平均（不去极值）")
+    print("🎯 Kronos优化预测策略")
+    print("基于推荐采样参数 - 3次直接平均（不去极值）")
     print("=" * 50)
     print(f"⏰ 脚本开始时间: {start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 50)
 
-    # 配置参数（基于论文推荐）
+    # 配置参数（基于推荐）
     config = {
-        "data_file": "./data/XAUUSDH1_utf8.csv",  # 您的数据文件路径
+        "data_file": "./data/XAUUSDM5_utf8.csv",  # 您的数据文件路径
         "model_name": "NeoQuasar/Kronos-small",  # 推荐从small开始
         "lookback": 512,  # 历史数据窗口
-        "frequency": "H1",  # 数据频率，请匹配您的数据
+        "frequency": "M5",  # 数据频率，请匹配您的数据
         # 调整以提高选出最贴近实际走势的概率：
-        "num_predictions": 5,  # 增加候选次数（建议 5-10）
-        "temperature": 0.8,  # 降低温度提高确定性
-        "top_p": 0.6,  # 略收紧核采样
+        "num_predictions": 2,  # 增加候选次数（建议 5-10）
+        "temperature": 0.6,  # 降低温度提高确定性
+        "top_p": 0.7,  # 略收紧核采样
         "sample_count": 3,  # 每次内部采样增大以提升单次质量
         "compare_target_len": 20,  # 用于比较的真实数据条数（可调，建议 20-100）
         "pred_len": 100,  # 预测未来的周期个数
     }
 
-    print("📋 优化预测配置（基于论文推荐）:")
+    print("📋 优化预测配置（基于推荐）:")
     for key, value in config.items():
         print(f"  {key}: {value}")
     print("\n🧠 参数优化原理:")
@@ -779,7 +779,7 @@ def main():
         timing_info = result["timing_info"]
 
         print("\n📈 优化预测摘要:")
-        print(f"预测策略: 论文推荐参数 + 直接平均")
+        print(f"预测策略: 推荐参数 + 直接平均")
         print(f"预测次数: {config_info['num_predictions']} (全部使用)")
         print(f"有效预测: {len(result['all_predictions'])}")
         print(f"最后已知价格: {last_price:.4f}")
@@ -817,7 +817,7 @@ def main():
 
         # 优化效果分析
         print(f"\n🚀 优化效果分析:")
-        print(f"  • 采用论文推荐的低温度参数，提高预测确定性")
+        print(f"  • 采用推荐的低温度参数，提高预测确定性")
         print(f"  • 使用适中的核采样参数，平衡准确性与多样性")
         print(f"  • 3次直接平均，避免损失边缘信息")
         print(f"  • 每次预测内部多采样，提高单次预测质量")
@@ -835,7 +835,7 @@ def main():
     print(f"开始时间: {start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"结束时间: {end_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"总执行时间: {total_script_time:.2f}秒 ({total_script_time/60:.2f}分钟)")
-    print("🎯 基于Kronos论文的优化策略执行完毕！")
+    print("🎯 基于Kronos的优化策略执行完毕！")
     print("=" * 50)
 
 
