@@ -22,6 +22,8 @@ except Exception:
     torch = None
     _TORCH_AVAILABLE = False
 
+gv_now = datetime.now().strftime("%Y%m%d%H%M%S")
+
 # 确保将项目根目录（脚本父目录的父目录）加入 sys.path，
 # 无论从哪里运行脚本都能正确导入项目内模块
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -32,7 +34,7 @@ if project_root not in sys.path:
 from model import Kronos, KronosTokenizer, KronosPredictor
 
 
-def generate_future_timestamps(last_timestamp, pred_len, frequency="H1"):
+def generate_future_timestamps(last_timestamp, pred_len, frequency):
     """
     生成未来时间戳 - 这是关键的修改点
 
@@ -609,8 +611,9 @@ def plot_prediction_results_adaptive(
     temperature = result["config"]["temperature"]
     top_p = result["config"]["top_p"]
     sample_count = result["config"]["sample_count"]
+    pred_len = result["config"]["pred_len"]
     plt.title(
-        f"Kronos Prediction Comparison ({freq_display},t:{temperature},p:{top_p},{sample_count}x{num_predictions}) - Change: {avg_change:.2f}%",
+        f"Prediction {pred_len} Bars ({freq_display},t:{temperature},p:{top_p},{sample_count}x{num_predictions}) - Change: {avg_change:.2f}%",
         fontsize=12,
         fontweight="bold",
         pad=20,
@@ -643,23 +646,23 @@ def main():
     start_datetime = datetime.now()
 
     print("🎯 Kronos优化预测策略")
-    print("基于推荐采样参数 - 3次直接平均（不去极值）")
+    print("基于推荐采样参数 - 3次直接平均")
     print("=" * 50)
     print(f"⏰ 脚本开始时间: {start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 50)
 
     # 配置参数（基于推荐）
     config = {
-        "data_file": "./data/XAUUSDM15_utf8.csv",  # 您的数据文件路径
+        "data_file": "./data/XAUUSDM1_utf8.csv",  # 您的数据文件路径
         "model_name": "NeoQuasar/Kronos-small",  # 推荐从small开始
         "lookback": 512,  # 历史数据窗口
-        "frequency": "M15",  # 数据频率，请匹配您的数据
-        "num_predictions": 3,  # 增加候选次数（建议 5-10）
+        "frequency": "M1",  # 数据频率，请匹配您的数据
+        "num_predictions": 3,  # 候选次数
         "temperature": 0.9,  # 降低温度提高确定性
         "top_p": 0.7,  # 略收紧核采样
         "sample_count": 3,  # 每次内部采样增大以提升单次质量
-        "compare_target_len": 20,  # 用于比较的真实数据条数（可调，建议 20-100）
-        "pred_len": 100,  # 预测未来的周期个数
+        "pred_len": 120,  # 总预测周期数,不可小于 compare_target_len
+        "compare_target_len": 60,  # 总预测周期数中用于比较的真实数据条数
     }
 
     print("📋 优化预测配置（基于推荐）:")
@@ -690,7 +693,8 @@ def main():
         plot_prediction_results_adaptive(
             result,
             save_path=os.path.join(
-                output_dir, f"prediction_future_compare_{config['frequency']}.png"
+                output_dir,
+                f"prediction_future_compare_{config['frequency']}_{config['compare_target_len']}_{config['pred_len']}_{gv_now}.png",
             ),
             history_display_ratio=0.10,  # 只显示部分的历史数据
             y_axis_expand_ratio=0.15,  # Y轴扩展15%
@@ -732,7 +736,8 @@ def main():
             )
 
             text_summary_path = os.path.join(
-                output_dir, f"prediction_future_compare_{config['frequency']}.txt"
+                output_dir,
+                f"prediction_future_compare_{config['frequency']}_{config['compare_target_len']}_{config['pred_len']}_{gv_now}.txt",
             )
             with open(text_summary_path, "w", encoding="utf-8") as f:
                 f.write("Kronos 预测摘要\n")

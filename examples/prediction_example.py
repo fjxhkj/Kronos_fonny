@@ -1,7 +1,15 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import sys
-sys.path.append("../")
+import os
+
+# 确保将项目根目录（脚本父目录的父目录）加入 sys.path，
+# 无论从哪里运行脚本都能正确导入项目内模块
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(script_dir, ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from model import Kronos, KronosTokenizer, KronosPredictor
 
 
@@ -43,20 +51,20 @@ tokenizer = KronosTokenizer.from_pretrained("NeoQuasar/Kronos-Tokenizer-base")
 model = Kronos.from_pretrained("NeoQuasar/Kronos-small")
 
 # 2. Instantiate Predictor
-# predictor = KronosPredictor(model, tokenizer, device="cuda:0", max_context=512)
-predictor = KronosPredictor(model, tokenizer, device="cpu", max_context=512)
+predictor = KronosPredictor(model, tokenizer, device="cuda:0", max_context=512)
+# predictor = KronosPredictor(model, tokenizer, device="cpu", max_context=512)
 
 # 3. Prepare Data
-df = pd.read_csv("./data/XAUUSDH1_utf8.csv")
+df = pd.read_csv("./data/XAUUSDM1_utf8.csv")
 df['timestamps'] = pd.to_datetime(df['timestamps'])
 
 # lookback 不可超过 max_context,而 max_context 目前最大仅支持512
 lookback = 512
-pred_len = 256
+pred_len = 100
 
-x_df = df.loc[:lookback-1, ['open', 'high', 'low', 'close', 'volume', 'amount']]
-x_timestamp = df.loc[:lookback-1, 'timestamps']
-y_timestamp = df.loc[lookback:lookback+pred_len-1, 'timestamps']
+x_df = df.loc[:lookback - 1, ['open', 'high', 'low', 'close', 'volume', 'amount']]
+x_timestamp = df.loc[:lookback - 1, 'timestamps']
+y_timestamp = df.loc[lookback:lookback + pred_len - 1, 'timestamps']
 
 # 4. Make Prediction
 pred_df = predictor.predict(
@@ -64,9 +72,9 @@ pred_df = predictor.predict(
     x_timestamp=x_timestamp,
     y_timestamp=y_timestamp,
     pred_len=pred_len,
-    T=1.0,
-    top_p=0.9,
-    sample_count=1,
+    T=0.8,
+    top_p=0.7,
+    sample_count=3,
     verbose=True
 )
 
@@ -75,7 +83,7 @@ print("Forecasted Data Head:")
 print(pred_df.head())
 
 # Combine historical and forecasted data for plotting
-kline_df = df.loc[:lookback+pred_len-1]
+kline_df = df.loc[:lookback + pred_len - 1]
 
 # visualize
 plot_prediction(kline_df, pred_df)
